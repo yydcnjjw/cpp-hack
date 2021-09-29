@@ -1,13 +1,3 @@
-// target
-// clang 6.0.2
-// gcc 6.3.0 arm
-// gcc 4.4.5
-
-// TODO:
-// 生命周期的维护
-// context di
-// event model
-
 #include <rx/observable.hpp>
 
 template <typename Executor, typename ValueType> struct TimerObserver {
@@ -23,8 +13,8 @@ template <typename Executor, typename ValueType> struct TimerObserver {
     Promise<executor_type, void> promise(io_ctx_);
 
     timer_.expires_after(std::chrono::milliseconds(500));
-    timer_.async_wait(boost::bind(&self_type::print, this, promise, v,
-                                  boost::placeholders::_1));
+    timer_.async_wait(
+        std::bind(&self_type::print, this, promise, v, std::placeholders::_1));
     return promise.future();
   }
 
@@ -67,13 +57,30 @@ int main(int argc, char *argv[]) {
   boost::asio::io_context io_ctx;
 
   rx::observable<void, void>::interval(io_ctx, std::chrono::milliseconds(500))
-      .map([&io_ctx](long const &v) { return promise_resolve(io_ctx, v * v); })
-      .filter([&io_ctx](long const &v) {
+      // .map([&io_ctx](long const &v) {
+      //   if (v && v % 5 == 0) {
+      //     return promise_error<long>(io_ctx,
+      //                                boost::system::errc::make_error_code(
+      //                                    boost::system::errc::broken_pipe));
+      //   } else {
+      //     return promise_resolve(io_ctx, v * v);
+      //   }
+      // })
+      // .filter([&io_ctx](long const &v) {
+      //   if (v % 2 == 0) {
+      //     return promise_resolve(io_ctx, false);
+      //   } else {
+      //     return promise_resolve(io_ctx, true);
+      //   }
+      // })
+      .filter_map([&io_ctx](long const &v) {
+        boost::optional<long> result;
         if (v % 2 == 0) {
-          return promise_resolve(io_ctx, false);
+          result = v * v;
         } else {
-          return promise_resolve(io_ctx, true);
+          result = boost::none;
         }
+        return promise_resolve(io_ctx, result);
       })
       .subscribe(io_ctx, Test<boost::asio::io_context>{io_ctx});
 

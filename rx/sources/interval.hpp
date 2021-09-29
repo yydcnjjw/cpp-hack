@@ -21,10 +21,10 @@ class interval : public source_base<long> {
 
     template <typename Subscriber>
     void bind_this(Subscriber o, Future<void> fut) {
-      fut.then(boost::bind(&inner::operator()<Subscriber>, shared_from_this(),
-                           o, boost::system::error_code()))
-          .error(boost::bind(&inner::operator()<Subscriber>, shared_from_this(),
-                             o, boost::placeholders::_1));
+      fut.then(std::bind(&inner::operator()<Subscriber>, shared_from_this(), o,
+                         boost::system::error_code()))
+          .error(std::bind(&inner::operator()<Subscriber>, shared_from_this(),
+                           o, std::placeholders::_1));
     }
 
     template <typename Subscriber>
@@ -43,8 +43,8 @@ class interval : public source_base<long> {
           timer_.expires_after(period_);
 
           BOOST_ASIO_CORO_YIELD timer_.async_wait(
-              boost::bind(&inner::operator()<Subscriber>, shared_from_this(), o,
-                          boost::placeholders::_1));
+              std::bind(&inner::operator()<Subscriber>, shared_from_this(), o,
+                        std::placeholders::_1));
 
           BOOST_ASIO_CORO_YIELD bind_this(o, o.on_next(counter_++));
         }

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <boost/asio.hpp>
-#include <boost/bind/bind.hpp>
 #include <functional>
 #include <iostream>
 #include <type_traits>
@@ -12,19 +11,18 @@ template <typename Result> struct Future;
 
 template <typename Result>
 struct FutureImpl : public std::enable_shared_from_this<FutureImpl<Result>> {
-  // TODO: once call
   using result_type = Result;
   using self_type = FutureImpl<Result>;
   using then_fn = std::function<void(result_type)>;
-  using catch_fn = std::function<void(future_error)>;
+  using error_fn = std::function<void(future_error)>;
 
   self_type &then(then_fn fn) {
     then_fn_ = std::move(fn);
     return *this;
   }
 
-  self_type &error(catch_fn fn) {
-    catch_fn_ = std::move(fn);
+  self_type &error(error_fn fn) {
+    error_fn_ = std::move(fn);
     return *this;
   }
 
@@ -33,8 +31,8 @@ struct FutureImpl : public std::enable_shared_from_this<FutureImpl<Result>> {
     release_fn();
   }
 
-  void notifiy_error(boost::system::error_code const &ec) {
-    catch_fn_(ec);
+  void notifiy_error(future_error const &ec) {
+    error_fn_(ec);
     release_fn();
   }
 
@@ -42,11 +40,11 @@ struct FutureImpl : public std::enable_shared_from_this<FutureImpl<Result>> {
 
   void release_fn() {
     then_fn_ = {};
-    catch_fn_ = {};
+    error_fn_ = {};
   }
 
   then_fn then_fn_;
-  catch_fn catch_fn_;
+  error_fn error_fn_;
 };
 
 template <>
@@ -54,32 +52,37 @@ struct FutureImpl<void>
     : public std::enable_shared_from_this<FutureImpl<void>> {
   using self_type = FutureImpl<void>;
   using then_fn = std::function<void(void)>;
-  using catch_fn = std::function<void(future_error)>;
+  using error_fn = std::function<void(future_error)>;
 
   self_type &then(then_fn fn) {
     then_fn_ = std::move(fn);
     return *this;
   }
 
-  self_type &error(catch_fn fn) {
-    catch_fn_ = std::move(fn);
+  self_type &error(error_fn fn) {
+    error_fn_ = std::move(fn);
     return *this;
   }
 
   void notifiy_then() {
     then_fn_();
-    then_fn_ = {};
+    release_fn();
   }
 
   void notifiy_error(future_error const &ec) {
-    catch_fn_(ec);
-    catch_fn_ = {};
+    error_fn_(ec);
+    release_fn();
+  }
+
+  void release_fn() {
+    then_fn_ = {};
+    error_fn_ = {};
   }
 
   inline Future<void> shared();
 
   then_fn then_fn_;
-  catch_fn catch_fn_;
+  error_fn error_fn_;
 };
 
 template <typename Result> struct Future {
@@ -127,17 +130,16 @@ template <typename Executor, typename Result> struct Promise {
 
   void value(Result const &result) {
     boost::asio::post(io_ctx_,
-                      boost::bind(&future_type::notifiy_then, future_, result));
+                      std::bind(&future_type::notifiy_then, future_, result));
   }
 
   void value() {
-    boost::asio::post(io_ctx_,
-                      boost::bind(&future_type::notifiy_then, future_));
+    boost::asio::post(io_ctx_, std::bind(&future_type::notifiy_then, future_));
   }
 
   void error(future_error const &ec) {
     boost::asio::post(io_ctx_,
-                      boost::bind(&Future<Result>::notifiy_error, future_, ec));
+                      std::bind(&future_type::notifiy_error, future_, ec));
   }
 
   Future<Result> future() const { return future_->shared(); }
@@ -154,13 +156,12 @@ template <typename Executor> struct Promise<Executor, void> {
       : io_ctx_(io_ctx), future_(std::make_shared<future_type>()) {}
 
   void value() {
-    boost::asio::post(io_ctx_,
-                      boost::bind(&future_type::notifiy_then, future_));
+    boost::asio::post(io_ctx_, std::bind(&future_type::notifiy_then, future_));
   }
 
   void error(boost::system::error_code const &ec) {
     boost::asio::post(io_ctx_,
-                      boost::bind(&future_type::notifiy_error, future_, ec));
+                      std::bind(&future_type::notifiy_error, future_, ec));
   }
 
   Future<void> future() const { return future_->shared(); }
@@ -250,9 +251,9 @@ static inline Future<void> promise_resolve(Executor &io_ctx) {
   return promise.future();
 }
 
-template <typename Executor, typename ReturnType>
-static inline Future<ReturnType>
-promise_error(Executor &io_ctx, boost::system::error_code const &ec) {
+template <typename ReturnType, typename Executor>
+static inline Future<ReturnType> promise_error(Executor &io_ctx,
+                                               future_error const &ec) {
   Promise<Executor, ReturnType> promise(io_ctx);
   promise.error(ec);
   return promise.future();

@@ -8,6 +8,7 @@
 #include <rx/operators/filter.hpp>
 #include <rx/operators/lift.hpp>
 #include <rx/operators/map.hpp>
+#include <rx/operators/filter_map.hpp>
 
 #include <utility>
 
@@ -61,6 +62,17 @@ public:
   observable<LiftOperator> filter(Predicate &&pred) {
     return lift<SourceValue>(Map(std::forward<Predicate>(pred)));
   }
+
+  template <typename Selector,
+            typename SourceValue = typename self_type::value_type,
+            typename FilterMap = rx::filter_map_operator<SourceValue, Selector>,
+            typename OutputType = typename FilterMap::output_type,
+            typename LiftOperator =
+                rx::lift_operator<OutputType, source_operator_type, FilterMap>>
+  observable<LiftOperator> filter_map(Selector &&s) {
+    return lift<OutputType>(FilterMap(std::forward<Selector>(s)));
+  }
+  
 
   template <typename Executor, typename Observer>
   subscription &subscribe(Executor &ex, Observer ob) {
