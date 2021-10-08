@@ -11,15 +11,18 @@ template <typename T> struct is_optional : std::false_type {};
 template <typename... T>
 struct is_optional<boost::optional<T...>> : std::true_type {};
 
-template <typename T, typename Selector> struct filter_map_operator {
-  using source_value_type = T;
+template <typename InputType, typename Selector> struct filter_map_operator {
+  using input_type = InputType;
   using select_type = Selector;
   using future_type =
-      decltype((*(select_type *)nullptr)(*(source_value_type *)nullptr));
+      decltype((*(select_type *)nullptr)(*(input_type *)nullptr));
   using future_result_type = typename future_type::result_type;
+
   static_assert(is_optional<future_result_type>::value,
                 "Output must be boost::optional");
   using output_type = typename future_result_type::value_type;
+
+  using observer_type = observer<input_type, observer<output_type>>;
 
   select_type selector_;
 
@@ -77,7 +80,8 @@ template <typename T, typename Selector> struct filter_map_operator {
 
       Promise<executor_type, void> promise(ex_);
 
-      (*std::make_shared<filter_map_op>(this, promise, selector_(v)))({});
+      (*std::make_shared<filter_map_op>(this, promise,
+                                        selector_(std::forward<V>(v))))({});
 
       return promise.future();
     }
@@ -86,23 +90,19 @@ template <typename T, typename Selector> struct filter_map_operator {
 
     Future<void> on_completed() { return dest_.on_completed(); }
 
-    static subscriber<executor_type, source_value_type,
-                      observer<T, observer<output_type>>>
+    static subscriber<executor_type, input_type, observer_type>
     make(dest_type dest, select_type s) {
-      auto subscription = dest.get_subscription();
       auto &ex = dest.get_executor();
-      return subscriber<executor_type, source_value_type,
-                        observer<T, observer<output_type>>>(
-          ex, std::move(subscription),
+      return subscriber<executor_type, input_type, observer_type>(
+          ex, dest.get_subscription(),
           observer<output_type>(self_type(ex, std::move(dest), std::move(s))));
     }
   };
 
   template <typename Subscriber,
             typename Executor = typename Subscriber::executor_type>
-  subscriber<Executor, source_value_type, observer<T, observer<output_type>>>
-  operator()(Subscriber dest) {
-    return filter_map_observer<Subscriber>::make(dest, selector_);
+  subscriber<Executor, input_type, observer_type> operator()(Subscriber dest) {
+    return filter_map_observer<Subscriber>::make(std::move(dest), selector_);
   }
 };
 
