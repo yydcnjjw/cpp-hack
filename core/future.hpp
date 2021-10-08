@@ -26,12 +26,12 @@ struct FutureImpl : public std::enable_shared_from_this<FutureImpl<Result>> {
     return *this;
   }
 
-  void notifiy_then(result_type const &result) {
+  void notify_then(result_type const &result) {
     then_fn_(result);
     release_fn();
   }
 
-  void notifiy_error(future_error const &ec) {
+  void notify_error(future_error const &ec) {
     error_fn_(ec);
     release_fn();
   }
@@ -64,12 +64,12 @@ struct FutureImpl<void>
     return *this;
   }
 
-  void notifiy_then() {
+  void notify_then() {
     then_fn_();
     release_fn();
   }
 
-  void notifiy_error(future_error const &ec) {
+  void notify_error(future_error const &ec) {
     error_fn_(ec);
     release_fn();
   }
@@ -102,12 +102,12 @@ template <typename Result> struct Future {
     return *this;
   }
 
-  template <typename... Args> void notifiy_then(Args &&...args) {
-    impl_->notifiy_then(std::forward<Args>(args)...);
+  template <typename... Args> void notify_then(Args &&...args) {
+    impl_->notify_then(std::forward<Args>(args)...);
   }
 
-  template <typename... Args> void notifiy_error(Args &&...args) {
-    impl_->notifiy_error(std::forward<Args>(args)...);
+  template <typename... Args> void notify_error(Args &&...args) {
+    impl_->notify_error(std::forward<Args>(args)...);
   }
 
   std::shared_ptr<impl_type> impl_;
@@ -130,16 +130,16 @@ template <typename Executor, typename Result> struct Promise {
 
   void value(Result const &result) {
     boost::asio::post(io_ctx_,
-                      std::bind(&future_type::notifiy_then, future_, result));
+                      std::bind(&future_type::notify_then, future_, result));
   }
 
   void value() {
-    boost::asio::post(io_ctx_, std::bind(&future_type::notifiy_then, future_));
+    boost::asio::post(io_ctx_, std::bind(&future_type::notify_then, future_));
   }
 
   void error(future_error const &ec) {
     boost::asio::post(io_ctx_,
-                      std::bind(&future_type::notifiy_error, future_, ec));
+                      std::bind(&future_type::notify_error, future_, ec));
   }
 
   Future<Result> future() const { return future_->shared(); }
@@ -156,12 +156,12 @@ template <typename Executor> struct Promise<Executor, void> {
       : io_ctx_(io_ctx), future_(std::make_shared<future_type>()) {}
 
   void value() {
-    boost::asio::post(io_ctx_, std::bind(&future_type::notifiy_then, future_));
+    boost::asio::post(io_ctx_, std::bind(&future_type::notify_then, future_));
   }
 
   void error(boost::system::error_code const &ec) {
     boost::asio::post(io_ctx_,
-                      std::bind(&future_type::notifiy_error, future_, ec));
+                      std::bind(&future_type::notify_error, future_, ec));
   }
 
   Future<void> future() const { return future_->shared(); }
