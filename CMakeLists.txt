@@ -12,4 +12,5 @@ find_package(Threads REQUIRED)
 add_executable(cpp-test main.cc)
 target_link_libraries(cpp-test Threads::Threads)
 
-
+add_executable(rx-test rx_test.cc)
+target_link_libraries(rx-test Threads::Threads)

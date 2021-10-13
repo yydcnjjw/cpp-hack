@@ -1,89 +1,44 @@
-#include <rx/observable.hpp>
+#include <boost/callable_traits/is_invocable.hpp>
+#include <functional>
+#include <iostream>
 
-template <typename Executor, typename ValueType> struct TimerObserver {
-  using value_type = ValueType;
-  using executor_type = Executor;
-  using self_type = TimerObserver<Executor, value_type>;
+template <typename Output> struct async_context {};
 
-  TimerObserver(boost::asio::io_context &io_ctx)
-      : io_ctx_(io_ctx), timer_(io_ctx) {}
-  virtual ~TimerObserver() {}
+namespace ct = boost::callable_traits;
 
-  Future<void> on_next(value_type const &v) {
-    Promise<executor_type, void> promise(io_ctx_);
-
-    timer_.expires_after(std::chrono::milliseconds(500));
-    timer_.async_wait(
-        std::bind(&self_type::print, this, promise, v, std::placeholders::_1));
-    return promise.future();
-  }
-
-  void print(Promise<executor_type, void> promise, value_type v,
-             boost::system::error_code ec) {
-    std::cout << v << std::endl;
-    promise.value();
-  }
-
-  Future<void> on_completed() {
-    std::cout << "on_complete" << std::endl;
-    return promise_resolve(io_ctx_);
-  }
-
-  Future<void> on_error(boost::system::error_code const &ec) {
-    std::cout << "on_error: " << ec << std::endl;
-    return promise_resolve(io_ctx_);
-  }
-
-  executor_type &io_ctx_;
-  boost::asio::system_timer timer_;
+template <typename Invoke> struct is_async_invoke {
+  // using type = is_async_invoke_impl<Invoke>
+};
+template <typename InvokeType> struct async_invoke_output {
+  using type = void;
 };
 
-template <typename Executor> struct Test {
-  Test(Executor &io_ctx)
-      : ob(std::make_shared<TimerObserver<Executor, long>>(io_ctx)) {}
-
-  Future<void> on_next(long v) { return ob->on_next(v); }
-
-  Future<void> on_error(boost::system::error_code const &ec) {
-    return ob->on_error(ec);
-  }
-
-  Future<void> on_completed() { return ob->on_completed(); }
-
-  std::shared_ptr<TimerObserver<Executor, long>> ob;
+template <typename OutputType, typename... Args>
+struct async_invoke_output<void (*)(async_context<OutputType>, Args...)> {
+  using type = OutputType;
 };
+
+template <typename OutputType, typename... Args>
+struct async_invoke_output<
+    std::function<void(async_context<OutputType>, Args...)>> {
+  using type = OutputType;
+};
+
+// template <typename Selector> struct async_invoke_output {
+//   template <typename OutputType, typename... Args>
+//   using type = typename std::conditional<
+//       ct::is_invocable<Selector, async_context<OutputType>, Args...>::value,
+//       OutputType, void>::type;
+// };
+
+// template <typename Selector> void a(Selector &&) {
+//   static_assert(
+//       std::is_same<typename async_invoke_output<Selector>::template type<>,
+//                    long>::value,
+//       "");
+// }
+
 
 int main(int argc, char *argv[]) {
-  boost::asio::io_context io_ctx;
-
-  rx::observable<void, void>::interval(io_ctx, std::chrono::milliseconds(500))
-      // .map([&io_ctx](long const &v) {
-      //   if (v && v % 5 == 0) {
-      //     return promise_error<long>(io_ctx,
-      //                                boost::system::errc::make_error_code(
-      //                                    boost::system::errc::broken_pipe));
-      //   } else {
-      //     return promise_resolve(io_ctx, v * v);
-      //   }
-      // })
-      // .filter([&io_ctx](long const &v) {
-      //   if (v % 2 == 0) {
-      //     return promise_resolve(io_ctx, false);
-      //   } else {
-      //     return promise_resolve(io_ctx, true);
-      //   }
-      // })
-      .filter_map([&io_ctx](long const &v) {
-        boost::optional<long> result;
-        if (v % 2 == 0) {
-          result = v * v;
-        } else {
-          result = boost::none;
-        }
-        return promise_resolve(io_ctx, result);
-      })
-      .subscribe(io_ctx, Test<boost::asio::io_context>{io_ctx});
-
-  io_ctx.run();
   return 0;
 }

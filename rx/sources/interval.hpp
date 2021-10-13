@@ -1,7 +1,7 @@
 #include <boost/asio.hpp>
+#include <rx/async_context.hpp>
 #include <rx/source.hpp>
-
-#include <core/future.hpp>
+#include <rx/type.hpp>
 
 namespace rx {
 
@@ -20,15 +20,23 @@ class interval : public source_base<long> {
         : timer_(ex), period_(p), counter_(0) {}
 
     template <typename Subscriber>
-    void bind_this(Subscriber o, Future<void> fut) {
-      fut.then(std::bind(&inner::operator()<Subscriber>, shared_from_this(), o,
-                         boost::system::error_code()))
-          .error(std::bind(&inner::operator()<Subscriber>, shared_from_this(),
-                           o, std::placeholders::_1));
+    async_context<void> bind_context(Subscriber &&o) {
+      return make_async_context<void>(std::bind(&inner::operator()<Subscriber>,
+                                                shared_from_this(), o,
+                                                std::placeholders::_1));
     }
 
     template <typename Subscriber>
-    void operator()(Subscriber o, future_error const &ec) {
+    void on_error(Subscriber &&o, rx::error_type e) {
+      o.on_error(bind_context(std::forward<Subscriber>(o)), e);
+    }
+
+    template <typename Subscriber> void on_next(Subscriber &&o, value_type v) {
+      o.on_next(bind_context(std::forward<Subscriber>(o)), v);
+    }
+
+    template <typename Subscriber>
+    void operator()(Subscriber &&o, boost::system::error_code const &ec) {
       BOOST_ASIO_CORO_REENTER(coro_) {
         for (;;) {
           if (!o.is_subscribed()) {
@@ -36,17 +44,18 @@ class interval : public source_base<long> {
           }
 
           if (ec) {
-            BOOST_ASIO_CORO_YIELD bind_this(o, o.on_error(ec));
+            BOOST_ASIO_CORO_YIELD on_error(std::forward<Subscriber>(o), ec);
             break;
           }
 
           timer_.expires_after(period_);
 
           BOOST_ASIO_CORO_YIELD timer_.async_wait(
-              std::bind(&inner::operator()<Subscriber>, shared_from_this(), o,
-                        std::placeholders::_1));
+              std::bind(&inner::operator()<Subscriber>, shared_from_this(),
+                        std::move(o), std::placeholders::_1));
 
-          BOOST_ASIO_CORO_YIELD bind_this(o, o.on_next(counter_++));
+          BOOST_ASIO_CORO_YIELD on_next(std::forward<Subscriber>(o),
+                                        counter_++);
         }
       }
     }
@@ -62,9 +71,9 @@ public:
   interval(Executor &ex, duration_type const &p)
       : inner_(std::make_shared<inner>(ex, p)) {}
 
-  template <typename Subscriber> void on_subscribe(Subscriber o) {
+  template <typename Subscriber> void on_subscribe(Subscriber &&o) {
     // TODO: verify Subscriber
-    (*inner_)(o, {});
+    (*inner_)(std::forward<Subscriber>(o), {});
   }
 
 private:

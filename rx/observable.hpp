@@ -5,21 +5,16 @@
 #include <rx/subscriber.hpp>
 #include <rx/subscription.hpp>
 
-#include <rx/operators/filter.hpp>
+// #include <rx/operators/filter.hpp>
+// #include <rx/operators/filter_map.hpp>
 #include <rx/operators/lift.hpp>
 #include <rx/operators/map.hpp>
-#include <rx/operators/filter_map.hpp>
 
 #include <utility>
 
 namespace rx {
 
-struct tag_observable {};
-
-template <typename T> struct observable_base {
-  using observable_tag = tag_observable;
-  using value_type = T;
-};
+template <typename T> struct observable_base { using value_type = T; };
 
 template <typename SourceOperator,
           typename T = typename SourceOperator::value_type>
@@ -44,40 +39,37 @@ public:
         LiftOperator(so_, std::forward<Operator>(op)));
   }
 
-  template <typename Selector,
+  template <typename OutputType, typename Selector,
             typename SourceValue = typename self_type::value_type,
-            typename Map = rx::map_operator<SourceValue, Selector>,
-            typename OutputType = typename Map::output_type,
+            typename Map = rx::map_operator<SourceValue, OutputType, Selector>,
             typename LiftOperator =
                 rx::lift_operator<OutputType, source_operator_type, Map>>
   observable<LiftOperator> map(Selector &&s) {
     return lift<OutputType>(Map(std::forward<Selector>(s)));
   }
 
-  template <typename Predicate,
-            typename SourceValue = typename self_type::value_type,
-            typename Map = rx::filter_operator<SourceValue, Predicate>,
-            typename LiftOperator =
-                rx::lift_operator<SourceValue, source_operator_type, Map>>
-  observable<LiftOperator> filter(Predicate &&pred) {
-    return lift<SourceValue>(Map(std::forward<Predicate>(pred)));
-  }
+  // template <typename Predicate,
+  //           typename SourceValue = typename self_type::value_type,
+  //           typename Map = rx::filter_operator<SourceValue, Predicate>,
+  //           typename LiftOperator =
+  //               rx::lift_operator<SourceValue, source_operator_type, Map>>
+  // observable<LiftOperator> filter(Predicate &&pred) {
+  //   return lift<SourceValue>(Map(std::forward<Predicate>(pred)));
+  // }
 
-  template <typename Selector,
-            typename SourceValue = typename self_type::value_type,
-            typename FilterMap = rx::filter_map_operator<SourceValue, Selector>,
-            typename OutputType = typename FilterMap::output_type,
-            typename LiftOperator =
-                rx::lift_operator<OutputType, source_operator_type, FilterMap>>
-  observable<LiftOperator> filter_map(Selector &&s) {
-    return lift<OutputType>(FilterMap(std::forward<Selector>(s)));
-  }
-  
+  // template <typename Selector,
+  //           typename SourceValue = typename self_type::value_type,
+  //           typename FilterMap = rx::filter_map_operator<SourceValue,
+  //           Selector>, typename OutputType = typename FilterMap::output_type,
+  //           typename LiftOperator =
+  //               rx::lift_operator<OutputType, source_operator_type,
+  //               FilterMap>>
+  // observable<LiftOperator> filter_map(Selector &&s) {
+  //   return lift<OutputType>(FilterMap(std::forward<Selector>(s)));
+  // }
 
-  template <typename Executor, typename Observer>
-  subscription &subscribe(Executor &ex, Observer ob) {
-    return detail_subscribe(
-        subscriber<Executor, T>(ex, observer<T>(std::move(ob))));
+  template <typename... Args> subscription subscribe(Args &&...args) {
+    return detail_subscribe(make_subscriber<T>(std::forward<Args>(args)...));
   }
 
 private:

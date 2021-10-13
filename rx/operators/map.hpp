@@ -1,17 +1,23 @@
 #pragma once
 
-#include <core/future.hpp>
+#include <assert.h>
+#include <boost/callable_traits/is_invocable.hpp>
+#include <boost/type_traits.hpp>
 #include <rx/subscriber.hpp>
 #include <rx/type.hpp>
 
 namespace rx {
 
-template <typename T, typename Selector> struct map_operator {
-  using source_value_type = T;
+template <typename InputType, typename OutputType, typename Selector>
+struct map_operator {
+  using input_type = InputType;
   using select_type = Selector;
-  using future_type =
-      decltype((*(select_type *)nullptr)(*(source_value_type *)nullptr));
-  using output_type = typename future_type::result_type;
+
+  using output_type = OutputType;
+
+  using is_async_invoke =
+      boost::callable_traits::is_invocable<Selector, async_context<output_type>,
+                                           input_type>;
 
   select_type selector_;
 
@@ -20,78 +26,75 @@ template <typename T, typename Selector> struct map_operator {
   template <typename Subscriber> struct map_observer {
     using self_type = map_observer<Subscriber>;
     using dest_type = Subscriber;
-    using executor_type = typename dest_type::executor_type;
 
-    executor_type &ex_;
+    using observer_type =
+        observer<input_type, detail::forward_observer_tag, self_type>;
+
     dest_type dest_;
     select_type selector_;
-    map_observer(executor_type &ex, dest_type dest, select_type selector)
-        : ex_(ex), dest_(std::move(dest)), selector_(std::move(selector)) {}
+    map_observer(dest_type dest, select_type selector)
+        : dest_(std::move(dest)), selector_(std::move(selector)) {}
 
-    struct map_op : public std::enable_shared_from_this<map_op> {
-      using parent_type = self_type;
-      map_op(parent_type *parent, Promise<executor_type, void> promise,
-             Future<output_type> fut)
-          : parent_(parent), promise_(std::move(promise)), fut_(fut) {
-      }
-
-      void error(future_error ec) { promise_.error(ec); }
-
-      void operator()(output_type v) {
-        BOOST_ASIO_CORO_REENTER(coro_) {
-
-          BOOST_ASIO_CORO_YIELD fut_
-              .then(std::bind(&map_op::operator(), this->shared_from_this(),
-                              std::placeholders::_1))
-              .error(std::bind(&map_op::error, this->shared_from_this(),
-                               std::placeholders::_1));
-
-          BOOST_ASIO_CORO_YIELD parent_->dest_.on_next(v)
-              .then(std::bind(&map_op::operator(), this->shared_from_this(), v))
-              .error(std::bind(&map_op::error, this->shared_from_this(),
-                               std::placeholders::_1));
-
-          promise_.value();
-        }
-      }
-
-      boost::asio::coroutine coro_;
-
-      parent_type *parent_;
-      Promise<executor_type, void> promise_;
-      Future<output_type> fut_;
-    };
-
-    template <typename V> Future<void> on_next(V &&v) {
-
-      Promise<executor_type, void> promise(ex_);
-
-      (*std::make_shared<map_op>(this, promise, selector_(v)))({});
-
-      return promise.future();
+    template <typename V> void on_next(V &&v) {
+      on_next(std::forward<V>(v), is_async_invoke());
     }
 
-    Future<void> on_error(error_type e) { return dest_.on_error(e); }
+    template <typename V> void on_next(V &&v, std::false_type) {
+      dest_.on_next(selector_(std::forward<V>(v)));
+    }
 
-    Future<void> on_completed() { return dest_.on_completed(); }
+    template <typename V> void on_next(V &&v, std::true_type) {
+      selector_(make_async_context<output_type>(
+          std::bind(&self_type::on_selector, this, std::placeholders::_1,
+                    std::placeholders::_2)));
+    }
 
-    static subscriber<executor_type, source_value_type,
-                      observer<T, observer<output_type>>>
-    make(dest_type dest, select_type s) {
-      auto subscription = dest.get_subscription();
-      auto &ex = dest.get_executor();
-      return subscriber<executor_type, source_value_type,
-                        observer<T, observer<output_type>>>(
-          ex, std::move(subscription),
-          observer<output_type>(self_type(ex, std::move(dest), std::move(s))));
+    template <typename V>
+    void on_next(async_context<void> yield, V &&v, std::false_type) {
+      dest_.on_next(std::move(yield), selector_(std::forward<V>(v)));
+    }
+
+    template <typename V> void on_next(async_context<void> yield, V &&v) {
+      on_next(yield, std::forward<V>(v), is_async_invoke());
+    }
+
+    template <typename V>
+    void on_next(async_context<void> yield, V &&v, std::true_type) {
+      selector_(make_async_context<output_type>(
+          std::bind(&self_type::on_selector, this, std::move(yield),
+                    std::placeholders::_1, std::placeholders::_2)));
+    }
+
+    void on_selector(error_type e, output_type o) { dest_.on_next(o); }
+
+    void on_selector(async_context<void> yield, error_type e, output_type o) {
+      dest_.on_next(yield, o);
+    }
+
+    template <typename... Args> void on_error(Args &&...args) {
+      return dest_.on_error(std::forward<Args>(args)...);
+    }
+
+    template <typename... Args> void on_completed(Args &&...args) {
+      return dest_.on_completed(std::forward<Args>(args)...);
+    }
+
+    template <typename _Subscriber>
+    static subscriber<input_type, observer_type> make(_Subscriber &&dest,
+                                                      select_type s) {
+      return make_subscriber<input_type>(
+          dest.get_subscription(),
+          make_observer<input_type>(
+              self_type(std::forward<_Subscriber>(dest), std::move(s))));
     }
   };
 
-  template <typename Subscriber,
-            typename Executor = typename Subscriber::executor_type>
-  subscriber<Executor, source_value_type, observer<T, observer<output_type>>>
-  operator()(Subscriber dest) {
-    return map_observer<Subscriber>::make(dest, selector_);
+  template <typename Subscriber>
+  subscriber<input_type, observer<input_type, detail::forward_observer_tag,
+                                  map_observer<Subscriber>>>
+  operator()(Subscriber &&dest) {
+    return map_observer<Subscriber>::make(std::forward<Subscriber>(dest),
+                                          selector_);
   }
 };
 

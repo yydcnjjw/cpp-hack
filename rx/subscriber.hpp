@@ -3,39 +3,31 @@
 #include <rx/subscription.hpp>
 namespace rx {
 
-template <typename Executor, typename T, typename Observer = observer<T>>
-class subscriber {
+template <typename T, typename Observer = observer<T, void>> class subscriber {
   using observer_type = Observer;
+  static_assert(is_observer<Observer>::value, "");
 
 public:
-  using executor_type = Executor;
+  // subscriber(observer_type ob) : ob_(std::move(ob)) {}
 
-  subscriber(executor_type &ex, observer_type ob)
-      : ex_(ex), ob_(std::move(ob)) {}
-  subscriber(executor_type &ex, subscription subscription, observer_type ob)
-      : ex_(ex), subscription_(std::move(subscription)), ob_(std::move(ob)) {}
+  subscriber(subscription subscription, observer_type ob)
+      : subscription_(std::move(subscription)), ob_(std::move(ob)) {}
 
-  template <typename V> Future<void> on_next(V &&v) {
+  template <typename... Args> void on_next(Args &&...args) {
     if (is_subscribed()) {
-      return ob_.on_next(std::forward<V>(v));
-    } else {
-      return promise_resolve(ex_);
+      return ob_.on_next(std::forward<Args>(args)...);
     }
   }
 
-  Future<void> on_error(error_type e) {
+  template <typename... Args> void on_error(Args &&...args) {
     if (is_subscribed()) {
-      return ob_.on_error(e);
-    } else {
-      return promise_resolve(ex_);
+      return ob_.on_error(std::forward<Args>(args)...);
     }
   }
 
-  Future<void> on_completed() {
+  template <typename... Args> void on_completed(Args &&...args) {
     if (is_subscribed()) {
-      return ob_.on_completed();
-    } else {
-      return promise_resolve(ex_);
+      return ob_.on_completed(std::forward<Args>(args)...);
     }
   }
 
@@ -43,26 +35,32 @@ public:
 
   subscription &get_subscription() { return subscription_; }
 
-  executor_type &get_executor() { return ex_; }
-
 private:
-  executor_type &ex_;
   subscription subscription_;
   observer_type ob_;
 };
 
-template <typename T, typename Executor, typename Observer>
-static inline subscriber<Executor, T, Observer> make_subscriber(Executor &&ex,
-                                                                Observer &&ob) {
-  return subscriber<Executor, T, Observer>(std::forward<Executor>(ex),
-                                           std::forward<Observer>(ob));
+// template <typename T, typename Observer>
+// static inline subscriber<T, Observer> make_subscriber(Observer &&ob) {
+//   return subscriber<T, Observer>(std::forward<Observer>(ob));
+// }
+
+template <typename T, typename... Args,
+          typename Observer = decltype(make_observer<T>(
+              std::forward<Args>(std::declval<Args>())...)),
+          typename Subscriber = subscriber<T, Observer>>
+static inline Subscriber make_subscriber(subscription s, Args &&...args) {
+  return Subscriber(std::move(s),
+                    make_observer<T>(std::forward<Args>(args)...));
 }
 
-template <typename T, typename Executor, typename Observer>
-static inline subscriber<Executor, T, Observer>
-make_subscriber(Executor &&ex, subscription s, Observer &&ob) {
-  return subscriber<Executor, T, Observer>(
-      std::forward<Executor>(ex), std::move(s), std::forward<Observer>(ob));
+template <typename T, typename... Args,
+          typename Observer = decltype(make_observer<T>(
+              std::forward<Args>(std::declval<Args>())...)),
+          typename Subscriber = subscriber<T, Observer>>
+static inline Subscriber make_subscriber(Args &&...args) {
+  return Subscriber(subscription(),
+                    make_observer<T>(std::forward<Args>(args)...));
 }
 
 } // namespace rx
